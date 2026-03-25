@@ -10,7 +10,6 @@ const ProductSchema = new mongoose.Schema({
   name: { type: String, required: true },
   category: { 
     type: String, 
-    enum: ["Sofa", "Bed", "Table", "Chair", "Mattress", "Recliner", "Cabinet", "Other"],
     required: true 
   },
   description: String,
