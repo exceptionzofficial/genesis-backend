@@ -96,13 +96,18 @@ exports.updateProduct = async (req, res) => {
       product.colors = parsedColors;
     }
     
+    // Update images - replace with current list from body + new files
+    let updatedImages = [];
     if (bodyImages) {
-      const urlList = Array.isArray(bodyImages) ? bodyImages : [bodyImages];
-      product.images = [...new Set([...product.images, ...urlList])];
+      updatedImages = Array.isArray(bodyImages) ? bodyImages : [bodyImages];
     }
     
     if (req.files && req.files.length > 0) {
-      product.images = [...product.images, ...req.files.map(f => f.path)];
+      updatedImages = [...updatedImages, ...req.files.map(f => f.path)];
+    }
+    
+    if (updatedImages.length > 0 || (bodyImages && bodyImages.length === 0)) {
+      product.images = updatedImages;
     }
 
     await product.save();
