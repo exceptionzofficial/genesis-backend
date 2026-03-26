@@ -25,7 +25,7 @@ exports.getProduct = async (req, res) => {
 // Create product
 exports.createProduct = async (req, res) => {
   try {
-    const { name, category, description, basePrice, stock, alertThreshold, colors, images: bodyImages } = req.body;
+    const { name, category, description, basePrice, stockEnabled, stock, alertThreshold, colors, images: bodyImages } = req.body;
     let images = req.files ? req.files.map(f => f.path) : [];
     let parsedColors = typeof colors === 'string' ? JSON.parse(colors) : (colors || []);
 
@@ -50,8 +50,15 @@ exports.createProduct = async (req, res) => {
       images = [...images, ...urlList];
     }
     
+    // Parse stockEnabled safely
+    const isStockEnabled = stockEnabled === 'true' || stockEnabled === true || stockEnabled === undefined;
+    
     const product = new Product({
-      name, category, description, basePrice, stock, alertThreshold, images, 
+      name, category, description, basePrice, 
+      stockEnabled: isStockEnabled, 
+      stock: isStockEnabled ? stock : 0, 
+      alertThreshold: isStockEnabled ? alertThreshold : 0, 
+      images, 
       colors: parsedColors 
     });
     
@@ -65,7 +72,7 @@ exports.createProduct = async (req, res) => {
 // Update product
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, category, description, basePrice, stock, alertThreshold, colors, images: bodyImages } = req.body;
+    const { name, category, description, basePrice, stockEnabled, stock, alertThreshold, colors, images: bodyImages } = req.body;
     const product = await Product.findById(req.params.id);
     
     if (!product) return res.status(404).json({ message: "Product not found" });
@@ -74,6 +81,9 @@ exports.updateProduct = async (req, res) => {
     if (category) product.category = category;
     if (description) product.description = description;
     if (basePrice) product.basePrice = basePrice;
+    if (stockEnabled !== undefined && stockEnabled !== 'undefined') {
+      product.stockEnabled = stockEnabled === 'true' || stockEnabled === true;
+    }
     if (stock) product.stock = stock;
     if (alertThreshold) product.alertThreshold = alertThreshold;
     if (colors) {

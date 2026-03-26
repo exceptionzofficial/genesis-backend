@@ -1,5 +1,6 @@
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const Settings = require("../models/Settings");
 const { generateInvoice } = require("../utils/invoiceGenerator");
 
 // Get all orders
@@ -34,10 +35,10 @@ exports.createOrder = async (req, res) => {
     
     await order.save();
 
-    // Deduct Stock
+    // Deduct Stock (Only if enabled for that product)
     for (const item of items) {
       const product = await Product.findById(item.productId);
-      if (product) {
+      if (product && product.stockEnabled) {
         product.stock = Math.max(0, product.stock - item.quantity);
         await product.save();
       }
@@ -76,10 +77,19 @@ exports.downloadInvoice = async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: "Order not found" });
 
+    // Fetch Store Settings
+    const storeInfoSetting = await Settings.findOne({ key: 'store_info' });
+    const reviewUrlSetting = await Settings.findOne({ key: 'googleReviewUrl' });
+    
+    const settings = {
+      store_info: storeInfoSetting?.value,
+      googleReviewUrl: reviewUrlSetting?.value
+    };
+
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename=invoice_${order._id}.pdf`);
     
-    await generateInvoice(order, res);
+    await generateInvoice(order, res, settings);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message });
@@ -91,7 +101,10 @@ exports.getDashboardStats = async (req, res) => {
   try {
     const totalOrders = await Order.countDocuments();
     const products = await Product.countDocuments();
-    const lowStockCount = await Product.countDocuments({ $expr: { $lte: ["$stock", "$alertThreshold"] } });
+    const lowStockCount = await Product.countDocuments({ 
+      stockEnabled: true, 
+      $expr: { $lte: ["$stock", "$alertThreshold"] } 
+    });
     
     // Total Revenue (Total Advance Paid)
     const revenueData = await Order.aggregate([

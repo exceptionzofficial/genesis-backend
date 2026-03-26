@@ -29,3 +29,15 @@ exports.updateSetting = async (req, res) => {
     res.status(400).json({ message: err.message });
   }
 };
+
+// Upload Logo
+exports.uploadLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+    res.json({ url: req.file.path });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
