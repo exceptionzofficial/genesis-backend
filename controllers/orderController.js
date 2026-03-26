@@ -134,3 +134,65 @@ exports.getDashboardStats = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+// Detailed Analytics
+exports.getAnalytics = async (req, res) => {
+  try {
+    const { range = 'month' } = req.query; // 'day', 'week', 'month', 'year'
+    
+    let dateLimit = new Date();
+    if (range === 'day') dateLimit.setHours(0, 0, 0, 0); 
+    else if (range === 'week') dateLimit.setDate(dateLimit.getDate() - 7);
+    else if (range === 'month') dateLimit.setMonth(dateLimit.getMonth() - 1);
+    else if (range === 'year') dateLimit.setFullYear(dateLimit.getFullYear() - 1);
+
+    // 1. Revenue Trends (Group by Date)
+    const revenueTrends = await Order.aggregate([
+      { $match: { createdAt: { $gte: dateLimit } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          revenue: { $sum: "$advancePaid" },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { "_id": 1 } }
+    ]);
+
+    // 2. Category Distribution
+    const categorySales = await Order.aggregate([
+      { $match: { createdAt: { $gte: dateLimit } } },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: "$items.category",
+          total: { $sum: { $multiply: ["$items.unitPrice", "$items.quantity"] } },
+          units: { $sum: "$items.quantity" }
+        }
+      }
+    ]);
+
+    // 3. Top Products
+    const topProducts = await Order.aggregate([
+      { $match: { createdAt: { $gte: dateLimit } } },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: "$items.productName",
+          sales: { $sum: "$items.quantity" },
+          revenue: { $sum: { $multiply: ["$items.unitPrice", "$items.quantity"] } }
+        }
+      },
+      { $sort: { sales: -1 } },
+      { $limit: 5 }
+    ]);
+
+    res.json({
+      revenueTrends,
+      categorySales,
+      topProducts
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
