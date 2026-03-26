@@ -99,28 +99,49 @@ exports.downloadInvoice = async (req, res) => {
 // Dashboard Stats
 exports.getDashboardStats = async (req, res) => {
   try {
-    const totalOrders = await Order.countDocuments();
-    const products = await Product.countDocuments();
-    const lowStockCount = await Product.countDocuments({ 
-      stockEnabled: true, 
-      $expr: { $lte: ["$stock", "$alertThreshold"] } 
-    });
+    console.log("Fetching Dashboard Stats...");
     
-    // Total Revenue (Total Advance Paid)
-    const revenueData = await Order.aggregate([
-      { $group: { _id: null, total: { $sum: "$advancePaid" } } }
-    ]);
-    const totalRevenue = revenueData.length > 0 ? revenueData[0].total : 0;
+    // 1. Basic counts
+    const totalOrders = await Order.countDocuments().catch(e => { console.error("TotalOrders Err:", e); return 0; });
+    const products = await Product.countDocuments().catch(e => { console.error("Products Err:", e); return 0; });
+    
+    // 2. Low Stock Count
+    let lowStockCount = 0;
+    try {
+      lowStockCount = await Product.countDocuments({ 
+        stockEnabled: true, 
+        $expr: { $lte: ["$stock", "$alertThreshold"] } 
+      });
+    } catch (e) {
+      console.error("LowStock Aggregation Err:", e);
+      lowStockCount = await Product.countDocuments({ stockEnabled: true, stock: { $lt: 5 } });
+    }
+    
+    // 3. Total Revenue
+    let totalRevenue = 0;
+    try {
+      const revenueData = await Order.aggregate([
+        { $group: { _id: null, total: { $sum: { $ifNull: ["$advancePaid", 0] } } } }
+      ]);
+      totalRevenue = revenueData.length > 0 ? revenueData[0].total : 0;
+    } catch (e) {
+      console.error("Revenue Aggregation Err:", e);
+    }
 
-    // Recent Orders
-    const recentOrders = await Order.find().sort({ createdAt: -1 }).limit(10);
+    // 4. Recent Orders
+    const recentOrders = await Order.find().sort({ createdAt: -1 }).limit(10).catch(e => []);
 
-    // Pending Payments
-    const pendingPaymentData = await Order.aggregate([
-      { $match: { paymentStatus: { $ne: "completed" } } },
-      { $group: { _id: null, total: { $sum: "$remainingBalance" } } }
-    ]);
-    const pendingPaymentTotal = pendingPaymentData.length > 0 ? pendingPaymentData[0].total : 0;
+    // 5. Pending Payments
+    let pendingPaymentTotal = 0;
+    try {
+      const pendingPaymentData = await Order.aggregate([
+        { $match: { paymentStatus: { $ne: "completed" } } },
+        { $group: { _id: null, total: { $sum: { $ifNull: ["$remainingBalance", 0] } } } }
+      ]);
+      pendingPaymentTotal = pendingPaymentData.length > 0 ? pendingPaymentData[0].total : 0;
+    } catch (e) {
+      console.error("Pending Payment Aggregation Err:", e);
+    }
 
     res.json({
       totalOrders,
@@ -131,7 +152,8 @@ exports.getDashboardStats = async (req, res) => {
       pendingPaymentTotal
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("CRITICAL DASHBOARD ERROR:", err);
+    res.status(500).json({ message: "Internal Server Error", error: err.message });
   }
 };
 
@@ -164,10 +186,19 @@ exports.getAnalytics = async (req, res) => {
       { $match: { createdAt: { $gte: dateLimit } } },
       { $unwind: "$items" },
       {
+        $lookup: {
+          from: "products",
+          localField: "items.productId",
+          foreignField: "_id",
+          as: "product"
+        }
+      },
+      { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
+      {
         $group: {
-          _id: "$items.category",
-          total: { $sum: { $multiply: ["$items.unitPrice", "$items.quantity"] } },
-          units: { $sum: "$items.quantity" }
+          _id: { $ifNull: ["$product.category", "Uncategorized"] },
+          total: { $sum: { $multiply: [{ $ifNull: ["$items.unitPrice", 0] }, { $ifNull: ["$items.quantity", 0] }] } },
+          units: { $sum: { $ifNull: ["$items.quantity", 0] } }
         }
       }
     ]);
@@ -178,9 +209,9 @@ exports.getAnalytics = async (req, res) => {
       { $unwind: "$items" },
       {
         $group: {
-          _id: "$items.productName",
-          sales: { $sum: "$items.quantity" },
-          revenue: { $sum: { $multiply: ["$items.unitPrice", "$items.quantity"] } }
+          _id: { $ifNull: ["$items.productName", "Unknown Product"] },
+          sales: { $sum: { $ifNull: ["$items.quantity", 0] } },
+          revenue: { $sum: { $multiply: [{ $ifNull: ["$items.unitPrice", 0] }, { $ifNull: ["$items.quantity", 0] }] } }
         }
       },
       { $sort: { sales: -1 } },
@@ -193,6 +224,7 @@ exports.getAnalytics = async (req, res) => {
       topProducts
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("ANALYTICS ERROR:", err);
+    res.status(500).json({ message: "Analytics Calculation Failed", error: err.message });
   }
 };
