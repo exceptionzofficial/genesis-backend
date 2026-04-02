@@ -11,10 +11,34 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 5000;
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB Connected"))
-  .catch(err => console.error("MongoDB Connection Error:", err));
+// Cached connection for Vercel serverless cold starts
+let cachedDb = null;
+
+async function connectDB() {
+  if (cachedDb && mongoose.connection.readyState === 1) {
+    return cachedDb;
+  }
+
+  console.log("Connecting to MongoDB...");
+  cachedDb = await mongoose.connect(process.env.MONGO_URI, {
+    serverSelectionTimeoutMS: 5000,
+    connectTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  });
+  console.log("MongoDB Connected");
+  return cachedDb;
+}
+
+// Middleware: ensure DB is connected before handling any request
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error("DB Connection Failed:", err.message);
+    res.status(503).json({ message: "Database connection failed. Please try again." });
+  }
+});
 
 // Routes
 app.use("/api/products", require("./routes/productRoutes"));
@@ -23,4 +47,9 @@ app.use("/api/settings", require("./routes/settingsRoutes"));
 
 app.get("/", (req, res) => res.send("Genesis API Running"));
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Start server for local dev (Vercel uses the export)
+if (process.env.NODE_ENV !== "production") {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
+
+module.exports = app;
