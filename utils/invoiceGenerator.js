@@ -3,16 +3,22 @@ const axios = require("axios");
 const QRCode = require("qrcode");
 
 /**
- * Generates a PDF invoice for an order.
+ * Generates a single-page A4 PDF invoice for an order.
  * @param {Object} order - The order object from MongoDB.
  * @param {Stream} stream - Output stream.
  * @param {Object} settings - Store settings (logo, phone, etc.)
  */
 const generateInvoice = async (order, stream, settings = {}) => {
-  const doc = new PDFDocument({ margin: 40, size: 'A4' });
+  const doc = new PDFDocument({ margin: 30, size: 'A4' }); // A4: 595 x 842 pts
 
   // Pipe to provided stream
   doc.pipe(stream);
+
+  const pageW = 595;
+  const pageH = 842;
+  const ml = 30; // margin left
+  const mr = 30; // margin right
+  const contentW = pageW - ml - mr; // 535
 
   const store = settings.store_info || {
     name: "GENESIS FURNITURE",
@@ -23,149 +29,212 @@ const generateInvoice = async (order, stream, settings = {}) => {
     logo: ""
   };
 
-  // --- Header ---
-  doc.rect(0, 0, 595, 110).fill("#1A3324");
+  // ===========================
+  // HEADER BAR (compact: 80pt)
+  // ===========================
+  const headerH = 80;
+  doc.rect(0, 0, pageW, headerH).fill("#1A3324");
   
-  let headerTextX = 40;
+  let headerTextX = ml;
   if (store.logo) {
     try {
       const response = await axios.get(store.logo, { responseType: 'arraybuffer' });
-      doc.image(response.data, 40, 20, { height: 60 });
-      headerTextX = 120;
+      doc.image(response.data, ml, 14, { height: 50 });
+      headerTextX = ml + 70;
     } catch (e) {
       console.error("Invoice Logo Load Failed:", e.message);
     }
   }
 
-  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(24).text(store.name || "GENESIS FURNITURE", headerTextX, 30, { characterSpacing: 1 });
-  doc.font("Helvetica").fontSize(8).text("PREMIUM INTERIORS & DECOR SOLUTIONS", headerTextX, 60, { characterSpacing: 1 });
-  
-  doc.fillColor("#FFFFFF").fontSize(9).text(store.address, 300, 30, { width: 255, align: "right", lineGap: 2 });
-  doc.text(`Phone: ${store.phone}`, 300, 75, { width: 255, align: "right" });
-  doc.text(store.website, 300, 88, { width: 255, align: "right" });
-  
-  // --- Invoice Info Header ---
-  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(20).text("INVOICE", 40, 130);
-  
-  // Draw a line
-  doc.moveTo(40, 155).lineTo(555, 155).strokeColor("#E5E7EB").lineWidth(1).stroke();
+  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(18).text(store.name || "GENESIS FURNITURE", headerTextX, 18, { characterSpacing: 0.5 });
+  doc.font("Helvetica").fontSize(7).text("PREMIUM INTERIORS & DECOR SOLUTIONS", headerTextX, 40, { characterSpacing: 0.5 });
 
-  // --- Billing Info Grid ---
-  // Left side: Customer Info
-  doc.fillColor("#6B7280").font("Helvetica-Bold").fontSize(10).text("BILL TO", 40, 170);
-  doc.fillColor("#111827").fontSize(12).text(order.customerName, 40, 185);
-  doc.font("Helvetica").fontSize(10).fillColor("#4B5563").text(order.phone, 40, 202);
-  doc.text(order.address || "No address provided", 40, 215, { width: 250 });
+  // Address in header - right side
+  doc.fillColor("#FFFFFF").fontSize(7).text(store.address, 300, 14, { width: pageW - 300 - mr, align: "right", lineGap: 1.5 });
+  doc.text(`Phone: ${store.phone}`, 300, 56, { width: pageW - 300 - mr, align: "right" });
+  doc.text(store.website || store.email || "", 300, 66, { width: pageW - 300 - mr, align: "right" });
 
-  // Right side: Order Info
-  doc.fillColor("#6B7280").font("Helvetica-Bold").fontSize(10).text("INVOICE DETAILS", 350, 170);
-  doc.fillColor("#111827").font("Helvetica").fontSize(10).text(`Invoice No:`, 350, 185);
-  doc.font("Helvetica-Bold").text(order._id.toString().toUpperCase().slice(-8), 430, 185);
-  
-  doc.font("Helvetica").text(`Date:`, 350, 200);
-  doc.font("Helvetica-Bold").text(new Date(order.createdAt).toLocaleDateString('en-IN'), 430, 200);
-  
-  doc.font("Helvetica").text(`Status:`, 350, 215);
+  // ===========================
+  // INVOICE TITLE + INFO
+  // ===========================
+  let y = headerH + 12;
+
+  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(16).text("INVOICE", ml, y);
+  y += 20;
+  doc.moveTo(ml, y).lineTo(pageW - mr, y).strokeColor("#E5E7EB").lineWidth(0.5).stroke();
+  y += 8;
+
+  // --- Billing Info Grid (Left: Customer, Right: Invoice details) ---
+  const infoY = y;
+
+  // Left: BILL TO
+  doc.fillColor("#6B7280").font("Helvetica-Bold").fontSize(8).text("BILL TO", ml, infoY);
+  doc.fillColor("#111827").font("Helvetica-Bold").fontSize(11).text(order.customerName, ml, infoY + 12);
+  doc.font("Helvetica").fontSize(9).fillColor("#4B5563").text(order.phone, ml, infoY + 26);
+  const addressText = order.address || "No address provided";
+  doc.text(addressText, ml, infoY + 38, { width: 240, lineGap: 1 });
+
+  // Right: INVOICE DETAILS
+  const rightCol = 370;
+  const valCol = 450;
+  doc.fillColor("#6B7280").font("Helvetica-Bold").fontSize(8).text("INVOICE DETAILS", rightCol, infoY);
+
+  doc.fillColor("#111827").font("Helvetica").fontSize(9).text("Invoice No:", rightCol, infoY + 13);
+  doc.font("Helvetica-Bold").text(order._id.toString().toUpperCase().slice(-8), valCol, infoY + 13);
+
+  doc.font("Helvetica").text("Date:", rightCol, infoY + 26);
+  doc.font("Helvetica-Bold").text(new Date(order.createdAt).toLocaleDateString('en-IN'), valCol, infoY + 26);
+
+  if (order.deliveryDate) {
+    doc.font("Helvetica").text("Delivery:", rightCol, infoY + 39);
+    doc.font("Helvetica-Bold").text(new Date(order.deliveryDate).toLocaleDateString('en-IN'), valCol, infoY + 39);
+  }
+
+  doc.font("Helvetica").text("Status:", rightCol, infoY + 52);
   const statusColors = {
-    'Delivered': "#059669",
-    'Cancelled': "#DC2626",
-    'Confirmed': "#1A3324",
-    'Pending': "#EAB308"
+    'Delivered': "#059669", 'delivered': "#059669",
+    'Cancelled': "#DC2626", 'cancelled': "#DC2626",
+    'Confirmed': "#1A3324", 'confirmed': "#1A3324",
+    'Pending': "#D97706", 'pending': "#D97706"
   };
-  const statusColor = statusColors[order.orderStatus] || "#EAB308";
-  doc.fillColor(statusColor).font("Helvetica-Bold").text(order.orderStatus?.toUpperCase() || "PENDING", 430, 215);
+  const statusColor = statusColors[order.orderStatus] || "#D97706";
+  doc.fillColor(statusColor).font("Helvetica-Bold").text((order.orderStatus || "PENDING").toUpperCase(), valCol, infoY + 52);
 
-  // --- Table Header ---
-  const tableTop = 260;
-  const col1 = 40;
-  const col2 = 240;
-  const col3 = 340;
-  const col4 = 400;
-  const col5 = 480;
-  const tableWidth = 515;
+  // ===========================
+  // ITEMS TABLE
+  // ===========================
+  y = infoY + 72;
 
-  doc.rect(col1, tableTop, tableWidth, 25).fill("#1A3324");
-  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(10).text("Item Description", col1 + 10, tableTop + 8);
-  doc.text("Color", col2, tableTop + 8);
-  doc.text("Qty", col3, tableTop + 8, { width: 50, align: "center" });
-  doc.text("Price", col4, tableTop + 8, { width: 70, align: "right" });
-  doc.text("Total", col5, tableTop + 8, { width: 65, align: "right" });
+  const col1 = ml;        // # 
+  const col2 = ml + 22;   // Item
+  const col3 = 250;       // Color
+  const col4 = 330;       // Qty
+  const col5 = 390;       // Price
+  const col6 = 480;       // Total
+  const tableRight = pageW - mr;
+  const tableWidth = tableRight - col1;
 
-  // --- Table Content ---
-  let position = tableTop + 25;
-  doc.font("Helvetica").fontSize(9);
-  
+  // Table Header
+  const thH = 20;
+  doc.rect(col1, y, tableWidth, thH).fill("#1A3324");
+  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(8);
+  doc.text("#", col1 + 5, y + 6);
+  doc.text("Item Description", col2 + 5, y + 6);
+  doc.text("Color", col3, y + 6, { width: 70 });
+  doc.text("Qty", col4, y + 6, { width: 50, align: "center" });
+  doc.text("Price", col5, y + 6, { width: 70, align: "right" });
+  doc.text("Total", col6, y + 6, { width: tableRight - col6 - 5, align: "right" });
+
+  y += thH;
+
+  // Table Rows
+  const rowH = 18;
+  doc.font("Helvetica").fontSize(8);
+
   order.items.forEach((item, index) => {
-    // Zebra striping
+    // Zebra
     if (index % 2 === 1) {
-      doc.rect(col1, position, tableWidth, 25).fill("#F9FAFB");
+      doc.rect(col1, y, tableWidth, rowH).fill("#F9FAFB");
     }
-    
-    // Bottom border for each row
-    doc.moveTo(col1, position + 25).lineTo(col1 + tableWidth, position + 25).strokeColor("#F3F4F6").lineWidth(0.5).stroke();
 
-    doc.fillColor("#1F2937").text(item.productName || "Product", col1 + 10, position + 8, { width: 180 });
-    doc.text(item.colorName || "-", col2, position + 8);
-    doc.text(item.quantity.toString(), col3, position + 8, { width: 50, align: "center" });
-    doc.text(`₹${item.unitPrice.toLocaleString('en-IN')}`, col4, position + 8, { width: 70, align: "right" });
-    doc.font("Helvetica-Bold").text(`₹${(item.unitPrice * item.quantity).toLocaleString('en-IN')}`, col5, position + 8, { width: 65, align: "right" });
+    // Row bottom line
+    doc.moveTo(col1, y + rowH).lineTo(tableRight, y + rowH).strokeColor("#F3F4F6").lineWidth(0.3).stroke();
+
+    const rowTextY = y + 5;
+    doc.fillColor("#6B7280").text(`${index + 1}`, col1 + 5, rowTextY);
+    doc.fillColor("#1F2937").font("Helvetica-Bold").text(item.productName || "Product", col2 + 5, rowTextY, { width: col3 - col2 - 10 });
+    doc.font("Helvetica").fillColor("#4B5563").text(item.colorName || "-", col3, rowTextY, { width: 70 });
+    doc.fillColor("#1F2937").text(item.quantity.toString(), col4, rowTextY, { width: 50, align: "center" });
+    doc.text(`₹${item.unitPrice.toLocaleString('en-IN')}`, col5, rowTextY, { width: 70, align: "right" });
+    doc.font("Helvetica-Bold").fillColor("#111827").text(`₹${(item.unitPrice * item.quantity).toLocaleString('en-IN')}`, col6, rowTextY, { width: tableRight - col6 - 5, align: "right" });
     doc.font("Helvetica");
-    
-    position += 25;
+
+    y += rowH;
   });
 
   // Table Outer Border
-  doc.rect(col1, tableTop, tableWidth, position - tableTop).strokeColor("#E5E7EB").lineWidth(1).stroke();
+  doc.rect(col1, infoY + 72, tableWidth, y - (infoY + 72)).strokeColor("#E5E7EB").lineWidth(0.5).stroke();
 
-  // --- Summary Section ---
-  const summaryTop = position + 30;
-  const summaryLeft = 350;
-  const valueLeft = 470;
+  // ===========================
+  // SUMMARY SECTION
+  // ===========================
+  y += 12;
 
-  const drawSummaryLine = (label, value, y, isBold = false, color = "#111827") => {
-    doc.fillColor("#4B5563").font(isBold ? "Helvetica-Bold" : "Helvetica").fontSize(10).text(label, summaryLeft, y);
-    doc.fillColor(color).font(isBold ? "Helvetica-Bold" : "Helvetica").text(value, valueLeft, y, { width: 85, align: "right" });
+  const summaryLeft = 370;
+  const summaryValLeft = 480;
+  const summaryValW = tableRight - summaryValLeft;
+
+  const drawLine = (label, value, yPos, isBold = false, color = "#111827") => {
+    doc.fillColor("#4B5563").font(isBold ? "Helvetica-Bold" : "Helvetica").fontSize(9).text(label, summaryLeft, yPos);
+    doc.fillColor(color).font(isBold ? "Helvetica-Bold" : "Helvetica").text(value, summaryValLeft, yPos, { width: summaryValW, align: "right" });
   };
 
   const subtotal = order.totalAmount;
   const discount = order.discount || 0;
-  const grandTotal = subtotal - discount;
+  const gstPercentage = order.gstPercentage || 0;
+  const gstAmount = order.gstAmount || 0;
+  const grandTotal = subtotal - discount + gstAmount;
   const paid = order.advancePaid || 0;
   const balance = order.remainingBalance || 0;
 
-  drawSummaryLine("Subtotal", `₹${subtotal.toLocaleString('en-IN')}`, summaryTop);
-  drawSummaryLine("Discount", `- ₹${discount.toLocaleString('en-IN')}`, summaryTop + 20, false, "#DC2626");
-  
-  // Grand Total Box
-  doc.rect(summaryLeft - 10, summaryTop + 40, 215, 30).fill("#F3F4F6");
-  drawSummaryLine("Grand Total", `₹${grandTotal.toLocaleString('en-IN')}`, summaryTop + 50, true, "#1A3324");
+  drawLine("Subtotal", `₹${subtotal.toLocaleString('en-IN')}`, y);
+  y += 16;
 
-  drawSummaryLine("Amount Paid", `₹${paid.toLocaleString('en-IN')}`, summaryTop + 85, false, "#059669");
-  drawSummaryLine("Balance Due", `₹${balance.toLocaleString('en-IN')}`, summaryTop + 105, true, "#DC2626");
+  if (discount > 0) {
+    drawLine("Discount", `- ₹${discount.toLocaleString('en-IN')}`, y, false, "#DC2626");
+    y += 16;
+  }
 
-  // --- Thank You Message ---
-  doc.font("Helvetica-Oblique").fontSize(10).fillColor("#6B7280")
-    .text("Notes: Items once sold cannot be returned. Warranty as per manufacturer terms.", 40, summaryTop + 140);
+  if (gstPercentage > 0) {
+    drawLine(`GST (${gstPercentage}%)`, `+ ₹${gstAmount.toLocaleString('en-IN')}`, y, false, "#4B5563");
+    y += 16;
+  }
 
-  // --- Footer ---
-  const footerTop = 730;
-  doc.rect(0, footerTop, 595, 112).fill("#1A3324");
-  
+  // Grand Total highlight box
+  doc.rect(summaryLeft - 8, y - 2, tableRight - summaryLeft + 8, 22).fill("#F0FDF4");
+  doc.rect(summaryLeft - 8, y - 2, tableRight - summaryLeft + 8, 22).strokeColor("#BBF7D0").lineWidth(0.5).stroke();
+  drawLine("Grand Total", `₹${grandTotal.toLocaleString('en-IN')}`, y + 4, true, "#1A3324");
+  y += 30;
+
+  drawLine("Amount Paid", `₹${paid.toLocaleString('en-IN')}`, y, false, "#059669");
+  y += 16;
+
+  drawLine("Balance Due", `₹${balance.toLocaleString('en-IN')}`, y, true, balance > 0 ? "#DC2626" : "#059669");
+  y += 24;
+
+  // --- Notes (left side, aligned with summary) ---
+  const notesY = y - 70; // align with summary
+  doc.font("Helvetica-Bold").fontSize(8).fillColor("#6B7280").text("Notes:", ml, notesY);
+  doc.font("Helvetica").fontSize(7).fillColor("#9CA3AF")
+    .text("• Items once sold cannot be returned.", ml, notesY + 12, { width: 300 })
+    .text("• Warranty as per manufacturer terms.", ml, notesY + 22, { width: 300 })
+    .text("• Delivery dates are subject to availability.", ml, notesY + 32, { width: 300 });
+
+  // ===========================
+  // FOOTER - Fixed at bottom
+  // ===========================
+  const footerH = 65;
+  const footerTop = pageH - footerH;
+  doc.rect(0, footerTop, pageW, footerH).fill("#1A3324");
+
+  let footerContentX = 100;
+  let footerContentW = 400;
+
   if (settings.googleReviewUrl) {
     try {
       const qrDataUrl = await QRCode.toDataURL(settings.googleReviewUrl, { margin: 1, color: { dark: '#1A3324', light: '#FFFFFF' } });
-      doc.image(qrDataUrl, 40, footerTop + 20, { width: 60 });
-      doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(8).text("SCAN TO RATE US", 35, footerTop + 85, { width: 70, align: "center" });
+      doc.image(qrDataUrl, ml + 5, footerTop + 8, { width: 45 });
+      doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(6).text("SCAN TO RATE", ml, footerTop + 55, { width: 55, align: "center" });
+      footerContentX = 90;
     } catch (e) {
       console.error("QR Code Generation Failed:", e.message);
     }
   }
 
-  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(14).text(`Thank you for your business!`, 120, footerTop + 30, { align: "center", width: 350 });
-  doc.font("Helvetica").fontSize(8).fillColor("#BDBDBD").text("WE APPRECIATE YOUR TRUST IN GENESIS FURNITURE FOR YOUR HOME DECOR NEEDS.", 120, footerTop + 50, { align: "center", width: 350 });
-  
-  doc.moveTo(150, footerTop + 75).lineTo(440, footerTop + 75).strokeColor("rgba(255,255,255,0.2)").lineWidth(0.5).stroke();
-  doc.text("PRODUCED BY GENESIS FURNITURE MANAGEMENT SYSTEM", 120, footerTop + 85, { align: "center", width: 350 });
+  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(11).text("Thank you for your business!", footerContentX, footerTop + 14, { align: "center", width: footerContentW });
+  doc.font("Helvetica").fontSize(6.5).fillColor("#BDBDBD").text("WE APPRECIATE YOUR TRUST IN GENESIS FURNITURE FOR YOUR HOME DECOR NEEDS.", footerContentX, footerTop + 30, { align: "center", width: footerContentW });
+  doc.moveTo(footerContentX + 50, footerTop + 44).lineTo(footerContentX + footerContentW - 50, footerTop + 44).strokeColor("rgba(255,255,255,0.2)").lineWidth(0.3).stroke();
+  doc.fontSize(5.5).text("PRODUCED BY GENESIS FURNITURE MANAGEMENT SYSTEM", footerContentX, footerTop + 50, { align: "center", width: footerContentW });
 
   doc.end();
 };
