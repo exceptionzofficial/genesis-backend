@@ -15,6 +15,8 @@ const OrderSchema = new mongoose.Schema({
   items: [OrderItemSchema],
   totalAmount: { type: Number, required: true },
   discount: { type: Number, default: 0 },
+  gstPercentage: { type: Number, default: 0 },
+  gstAmount: { type: Number, default: 0 },
   advancePaid: { type: Number, default: 0 },
   remainingBalance: { type: Number, default: 0 },
   paymentStatus: { 
