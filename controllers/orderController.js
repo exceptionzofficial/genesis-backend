@@ -27,10 +27,10 @@ exports.getOrder = async (req, res) => {
 // Create order
 exports.createOrder = async (req, res) => {
   try {
-    const { customerName, phone, address, items, totalAmount, discount, advancePaid, remainingBalance, deliveryDate } = req.body;
+    const { customerName, phone, address, items, totalAmount, discount, gstPercentage, gstAmount, advancePaid, remainingBalance, deliveryDate } = req.body;
     
     const order = new Order({
-      customerName, phone, address, items, totalAmount, discount, advancePaid, remainingBalance, deliveryDate
+      customerName, phone, address, items, totalAmount, discount, gstPercentage, gstAmount, advancePaid, remainingBalance, deliveryDate
     });
     
     await order.save();
