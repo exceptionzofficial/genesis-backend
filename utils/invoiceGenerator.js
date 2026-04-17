@@ -10,7 +10,7 @@ const QRCode = require("qrcode");
  */
 const generateInvoice = async (order, stream, settings = {}) => {
   // Use autoFirstPage: true but we will manage height to prevent overflow
-  const doc = new PDFDocument({ margin: 0, size: 'A4' }); 
+  const doc = new PDFDocument({ margin: 0, size: 'A4' });
 
   // Pipe to provided stream
   doc.pipe(stream);
@@ -20,14 +20,19 @@ const generateInvoice = async (order, stream, settings = {}) => {
   const m = 30; // margin
   const cw = pageW - (m * 2); // content width: 535.28
 
-  const store = settings.store_info || {
+  const defaultStore = {
     name: "GENESIS FURNITURE",
-    phone: "+91 98765 43210",
+    phone: "+91 98427 20075",
+    gstin: "33ANIPA8129M1ZW",
+    tin_cst: "TIN No: 33532905144 / CST: 1042777 Dt: 18.10.10",
     email: "hello@genesisfurniture.com",
     website: "www.genesisfurniture.com",
     address: "Palayapalayam (RSF No 3/4, Puliankattu Thottam, 191/1, Perundurai Rd, opp. Renault Carshowroom, Indu Nagar, Erode, Tamil Nadu 638012",
     logo: ""
   };
+
+  // Merge database settings with defaults so missing fields like address are filled
+  const store = { ...defaultStore, ...(settings.store_info || {}) };
 
   // --- Helper: Draw Grid Line ---
   const line = (x1, y1, x2, y2, color = "#E5E7EB", width = 0.5) => {
@@ -39,7 +44,7 @@ const generateInvoice = async (order, stream, settings = {}) => {
 
   // 2. HEADER BLOCK (Logo & Invoice Title)
   doc.rect(m, m, cw, 80).fill("#1A3324");
-  
+
   if (store.logo) {
     try {
       const response = await axios.get(store.logo, { responseType: 'arraybuffer' });
@@ -58,12 +63,16 @@ const generateInvoice = async (order, stream, settings = {}) => {
   line(m, y, m + cw, y, "#111827", 1); // Horizontal separator
 
   // Box heights
-  const infoH = 100;
+  const infoH = 125;
   // BUSINESS DETAILS (Left)
   doc.fillColor("#6B7280").font("Helvetica-Bold").fontSize(8).text("FROM", m + 15, y + 15);
   doc.fillColor("#111827").font("Helvetica-Bold").fontSize(10).text(store.name, m + 15, y + 28);
   doc.font("Helvetica").fontSize(8).fillColor("#4B5563").text(store.address, m + 15, y + 42, { width: 240, lineGap: 2 });
-  doc.text(`Phone: ${store.phone}`, m + 15, y + 78);
+  
+  let addrFinalY = doc.y + 4;
+  doc.font("Helvetica-Bold").fontSize(8).fillColor("#111827").text(`Mob: ${store.phone}`, m + 15, addrFinalY);
+  doc.text(`GSTIN: ${store.gstin || '33ANIPA8129M1ZW'}`, m + 15, addrFinalY + 12);
+  doc.font("Helvetica").fontSize(7).text(store.tin_cst || '', m + 15, addrFinalY + 24);
 
   // Vertical divider in middle of info block
   line(m + (cw / 2), y, m + (cw / 2), y + infoH, "#111827", 1);
@@ -98,7 +107,7 @@ const generateInvoice = async (order, stream, settings = {}) => {
   const tbY = y;
   const col = [m, m + 40, m + 240, m + 320, m + 370, m + 450, m + cw];
   const th = 25;
-  
+
   doc.rect(m, y, cw, th).fill("#1A3324");
   doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(9);
   doc.text("#", col[0], y + 8, { width: 40, align: "center" });
@@ -116,17 +125,17 @@ const generateInvoice = async (order, stream, settings = {}) => {
 
   order.items.forEach((item, i) => {
     line(m, y, m + cw, y); // Horizontal row line
-    
+
     doc.text(`${i + 1}`, col[0], y + 7, { width: 40, align: "center" });
     doc.font("Helvetica-Bold").text(item.productName, col[1] + 10, y + 7, { width: 180, lineBreak: false });
     doc.font("Helvetica").text(item.colorName || "-", col[2], y + 7, { width: 80, align: "center" });
     doc.text(item.quantity.toString(), col[3], y + 7, { width: 50, align: "center" });
-    doc.text(`₹${item.unitPrice.toLocaleString('en-IN')}`, col[4], y + 7, { width: 80, align: "right" });
-    doc.font("Helvetica-Bold").text(`₹${(item.unitPrice * item.quantity).toLocaleString('en-IN')}`, col[5], y + 7, { width: 85, align: "right" });
-    
+    doc.text(`Rs.${item.unitPrice.toLocaleString('en-IN')}`, col[4], y + 7, { width: 80, align: "right" });
+    doc.font("Helvetica-Bold").text(`Rs.${(item.unitPrice * item.quantity).toLocaleString('en-IN')}`, col[5], y + 7, { width: 85, align: "right" });
+
     // Draw vertical cell lines
     col.forEach(x => line(x, y, x, y + rowH));
-    
+
     y += rowH;
   });
 
@@ -143,7 +152,7 @@ const generateInvoice = async (order, stream, settings = {}) => {
 
   const sumRow = (label, value, isBold = false, bgColor = null, textColor = "#111827") => {
     if (bgColor) {
-        doc.rect(sumX, y, sumW, 22).fill(bgColor);
+      doc.rect(sumX, y, sumW, 22).fill(bgColor);
     }
     doc.rect(sumX, y, sumW, 22).strokeColor("#111827").stroke();
     doc.fillColor(textColor).font(isBold ? "Helvetica-Bold" : "Helvetica").fontSize(9);
@@ -152,14 +161,14 @@ const generateInvoice = async (order, stream, settings = {}) => {
     y += 22;
   };
 
-  sumRow("Subtotal", `₹${order.totalAmount.toLocaleString('en-IN')}`);
-  if (order.discount > 0) sumRow("Discount (-)", `₹${order.discount.toLocaleString('en-IN')}`, false, null, "#B91C1C");
-  if (order.gstAmount > 0) sumRow(`GST (${order.gstPercentage}%)`, `₹${order.gstAmount.toLocaleString('en-IN')}`);
-  
+  sumRow("Subtotal", `Rs.${order.totalAmount.toLocaleString('en-IN')}`);
+  if (order.discount > 0) sumRow("Discount (-)", `Rs.${order.discount.toLocaleString('en-IN')}`, false, null, "#B91C1C");
+  if (order.gstAmount > 0) sumRow(`GST (${order.gstPercentage}%)`, `Rs.${order.gstAmount.toLocaleString('en-IN')}`);
+
   const grandTotal = order.totalAmount - (order.discount || 0) + (order.gstAmount || 0);
-  sumRow("Grand Total", `₹${grandTotal.toLocaleString('en-IN')}`, true, "#F0FDF4", "#166534");
-  sumRow("Advance Paid", `₹${order.advancePaid.toLocaleString('en-IN')}`, false, null, "#047857");
-  sumRow("Balance Due", `₹${order.remainingBalance.toLocaleString('en-IN')}`, true, "#FEF2F2", "#B91C1C");
+  sumRow("Grand Total", `Rs.${grandTotal.toLocaleString('en-IN')}`, true, "#F0FDF4", "#166534");
+  sumRow("Advance Paid", `Rs.${order.advancePaid.toLocaleString('en-IN')}`, false, null, "#047857");
+  sumRow("Balance Due", `Rs.${order.remainingBalance.toLocaleString('en-IN')}`, true, "#FEF2F2", "#B91C1C");
 
   // 8. NOTES & QR (Bottom Left)
   let footerY = subY + 15;
@@ -171,7 +180,7 @@ const generateInvoice = async (order, stream, settings = {}) => {
       const qrDataUrl = await QRCode.toDataURL(settings.googleReviewUrl, { margin: 1 });
       doc.image(qrDataUrl, m + 15, footerY + 65, { width: 60 });
       doc.fontSize(7).fillColor("#111827").font("Helvetica-Bold").text("SCAN TO RATE US", m + 15, footerY + 128, { width: 60, align: "center" });
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // 9. SIGNATURE BOX
